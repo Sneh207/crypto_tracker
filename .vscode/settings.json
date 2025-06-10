@@ -9,19 +9,6 @@
             "server": "localhost",
             "port": 3306,
             "driver": "MySQL",
-            "name": "crypto_tracker",
-            "database": "crypto_tracker",
-            "username": "root"
-        },
-        {
-            "mysqlOptions": {
-                "authProtocol": "default",
-                "enableSsl": "Disabled"
-            },
-            "previewLimit": 50,
-            "server": "localhost",
-            "port": 3306,
-            "driver": "MySQL",
             "name": "crypto_portfolio_tracker",
             "database": "crypto_tracker",
             "username": "root",
