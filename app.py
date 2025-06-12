@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import os
 from contextlib import contextmanager
 import logging
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -413,6 +414,75 @@ def get_all_coins():
         })
     
     
+# --- Add this new endpoint below ---
+
+@app.route('/api/coins/top-growth', methods=['GET'])
+def get_top_growth_coins():
+    """Get top 10 coins with best growth in the last year"""
+    try:
+        limit = int(request.args.get('limit', 10))
+        # Get top 10 coins by market cap
+        url = f"{COINGECKO_API_BASE}/coins/markets"
+        params = {
+            'vs_currency': 'usd',
+            'order': 'market_cap_desc',
+            'per_page': 10,  # Only top 10
+            'page': 1,
+            'sparkline': 'false'
+        }
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+        coins_data = response.json()
+
+        growth_coins = []
+        for coin in coins_data:
+            coin_id = coin['id']
+            # Fetch 1-year historical price data
+            hist_url = f"{COINGECKO_API_BASE}/coins/{coin_id}/market_chart"
+            hist_params = {'vs_currency': 'usd', 'days': 365}
+            hist_resp = requests.get(hist_url, params=hist_params, timeout=15)
+            if hist_resp.status_code != 200:
+                continue
+            hist_data = hist_resp.json()
+            prices = hist_data.get('prices', [])
+            if not prices or len(prices) < 2:
+                continue
+            old_price = prices[0][1]
+            current_price = prices[-1][1]
+            if old_price == 0:
+                continue
+            growth = ((current_price - old_price) / old_price) * 100
+            growth_coins.append({
+                'id': coin_id,
+                'name': coin['name'],
+                'symbol': coin['symbol'].upper(),
+                'current_price': current_price,
+                'market_cap': coin.get('market_cap', 0),
+                'market_cap_rank': coin.get('market_cap_rank', 0),
+                'price_change_24h': coin.get('price_change_24h', 0),
+                'price_change_percentage_24h': coin.get('price_change_percentage_24h', 0),
+                'price_change_percentage_1y': growth
+            })
+            time.sleep(1.2)  # To avoid CoinGecko rate limits
+
+        # Sort and return top growth coins
+        growth_coins.sort(key=lambda x: x['price_change_percentage_1y'], reverse=True)
+        top_growth_coins = growth_coins[:limit]
+        return jsonify({
+            'coins': top_growth_coins,
+            'total': len(top_growth_coins),
+            'period': '1y'
+        })
+    except Exception as e:
+        logger.error(f"Error fetching top growth coins: {e}")
+        return jsonify({
+            'coins': [],
+            'total': 0,
+            'period': '1y',
+            'error': str(e)
+        })
+    
+
 # Analytics endpoints
 @app.route('/api/analytics/market-growth', methods=['GET'])
 def get_market_growth():
