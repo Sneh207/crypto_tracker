@@ -99,7 +99,7 @@ const ErrorAlert = ({ error, onClose }) => (
   )
 );
 
-const CoinTableRow = React.memo(({ coin, index, page, perPage, onAddToPortfolio }) => (
+const CoinTableRow = React.memo(({ coin, index, page, perPage, onAddToPortfolio, onAddToWatchlist }) => (
   <tr className="hover:bg-gray-50">
     <td className="px-6 py-4 text-sm text-gray-900">
       #{((page - 1) * perPage) + index + 1}
@@ -125,13 +125,22 @@ const CoinTableRow = React.memo(({ coin, index, page, perPage, onAddToPortfolio 
       {formatCurrency(coin.market_cap)}
     </td>
     <td className="px-6 py-4 text-sm">
-      <button
-        onClick={() => onAddToPortfolio(coin)}
-        className="text-blue-600 hover:text-blue-900 mr-2"
-        title="Add to Portfolio"
-      >
-        <Plus size={16} />
-      </button>
+      <div className="flex gap-2">
+        <button
+          onClick={() => onAddToPortfolio(coin)}
+          className="text-blue-600 hover:text-blue-900"
+          title="Add to Portfolio"
+        >
+          <Plus size={16} />
+        </button>
+        <button
+          onClick={() => onAddToWatchlist(coin)}
+          className="text-yellow-600 hover:text-yellow-900"
+          title="Add to Watchlist"
+        >
+          <Activity size={16} />
+        </button>
+      </div>
     </td>
   </tr>
 ));
@@ -262,7 +271,7 @@ const TopGrowthCoinRow = React.memo(({ coin, index, onAddToPortfolio }) => (
   </tr>
 ));
 
-const MarketTab = ({ onAddToPortfolio }) => {
+const MarketTab = ({ onAddToPortfolio, onAddToWatchlist }) => {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(50);
   const [coins, setCoins] = useState([]);
@@ -458,6 +467,7 @@ const MarketTab = ({ onAddToPortfolio }) => {
                       page={page}
                       perPage={perPage}
                       onAddToPortfolio={onAddToPortfolio}
+                      onAddToWatchlist={onAddToWatchlist} 
                     />
                   )
                 ))
@@ -744,6 +754,7 @@ const AddFormModal = ({ show, onClose, onSubmit, form, setForm, loading }) => {
   );
 };
 
+
 const CryptoPortfolioTracker = () => {
   // State management
   const [activeTab, setActiveTab] = useState('portfolio');
@@ -751,6 +762,7 @@ const CryptoPortfolioTracker = () => {
   const [portfolioSummary, setPortfolioSummary] = useState({});
   const [watchlist, setWatchlist] = useState([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const { apiCall, loading, error, setError } = useApi();
   const [addForm, setAddForm] = useState({
     coin_id: '',
     coin_name: '',
@@ -759,8 +771,6 @@ const CryptoPortfolioTracker = () => {
     purchase_price: '',
     notes: ''
   });
-
-  const { apiCall, loading, error, setError } = useApi();
 
   // Data fetching functions
   const fetchPortfolio = useCallback(async () => {
@@ -781,6 +791,29 @@ const CryptoPortfolioTracker = () => {
       console.error('Failed to fetch watchlist');
     }
   }, [apiCall]);
+
+  const handleAddToWatchlist = useCallback(async (coin) => {
+    try {
+      const response = await apiCall('/watchlist', {
+        method: 'POST',
+        body: JSON.stringify({
+          coin_id: coin.id,
+          coin_name: coin.name,
+          symbol: coin.symbol
+        })
+      });
+      
+      if (response.success) {
+        setWatchlist(prev => [...prev, response.data]);
+        setError('Added to watchlist successfully!');
+        setTimeout(() => setError(''), 3000);
+      }
+    } catch (err) {
+      console.error('Failed to add to watchlist');
+      setError('Failed to add to watchlist');
+    }
+  }, [apiCall, setError]);
+
 
   // Load initial data
   useEffect(() => {
@@ -903,7 +936,10 @@ const CryptoPortfolioTracker = () => {
         )}
         
         {activeTab === 'market' && (
-          <MarketTab onAddToPortfolio={handleAddToPortfolio} />
+          <MarketTab 
+          onAddToPortfolio={handleAddToPortfolio} 
+          onAddToWatchlist={handleAddToWatchlist}
+          />
         )}
         
         {activeTab === 'watchlist' && (
@@ -928,5 +964,6 @@ const CryptoPortfolioTracker = () => {
     </div>
   );
 };
+
 
 export default CryptoPortfolioTracker;

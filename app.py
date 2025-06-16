@@ -8,6 +8,7 @@ import os
 from contextlib import contextmanager
 import logging
 import time
+from functools import wraps  
 
 app = Flask(__name__)
 CORS(app)
@@ -19,6 +20,23 @@ COINGECKO_API_BASE = 'https://api.coingecko.com/api/v3'
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Rate limiter decorator
+def rate_limited(max_per_second=1):
+    min_interval = 1.0 / max_per_second
+    last_called = [0.0]
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            elapsed = time.time() - last_called[0]
+            wait_time = min_interval - elapsed
+            if wait_time > 0:
+                time.sleep(wait_time)
+            last_called[0] = time.time()
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # Database context manager
 @contextmanager
@@ -52,10 +70,11 @@ def init_db():
         conn.execute('''
             CREATE TABLE IF NOT EXISTS watchlist (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                coin_id TEXT NOT NULL UNIQUE,
+                coin_id TEXT NOT NULL,
                 coin_name TEXT NOT NULL,
                 symbol TEXT NOT NULL,
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(coin_id)  -- Prevent duplicate coins
             )
         ''')
         
@@ -65,6 +84,14 @@ def init_db():
                 coin_id TEXT PRIMARY KEY,
                 data TEXT NOT NULL,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS coin_cache (
+                endpoint TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
@@ -92,9 +119,29 @@ def fetch_coin_data(coin_ids, vs_currency='usd'):
         logger.error(f"Error fetching coin data: {e}")
         return {}
 
+@rate_limited(0.5)  # Maximum 1 request every 2 seconds
 def fetch_coins_list(page=1, per_page=50, order='market_cap_desc'):
-    """Fetch list of coins from CoinGecko"""
+    """Fetch list of coins from CoinGecko with caching"""
     try:
+        cache_key = f"coins_list_{page}_{per_page}_{order}"
+        
+        # Check cache first
+        with get_db_connection() as conn:
+            cursor = conn.execute(
+                'SELECT data, timestamp FROM coin_cache WHERE endpoint = ?', 
+                (cache_key,)
+            )
+            cache_data = cursor.fetchone()
+            
+            # Return cached data if it's less than 5 minutes old
+            if cache_data:
+                data = json.loads(cache_data['data'])
+                cache_time = datetime.fromisoformat(cache_data['timestamp'])
+                if datetime.now() - cache_time < timedelta(minutes=5):
+                    logger.info("Returning cached coin data")
+                    return data
+
+        # If no cache or expired, fetch from API
         url = f"{COINGECKO_API_BASE}/coins/markets"
         params = {
             'vs_currency': 'usd',
@@ -106,9 +153,32 @@ def fetch_coins_list(page=1, per_page=50, order='market_cap_desc'):
         
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+
+        # Update cache
+        with get_db_connection() as conn:
+            conn.execute(
+                'INSERT OR REPLACE INTO coin_cache (endpoint, data, timestamp) VALUES (?, ?, ?)',
+                (cache_key, json.dumps(data), datetime.now().isoformat())
+            )
+            conn.commit()
+
+        return data
+
     except requests.RequestException as e:
         logger.error(f"Error fetching coins list: {e}")
+        
+        # Return cached data if available, even if expired
+        with get_db_connection() as conn:
+            cursor = conn.execute(
+                'SELECT data FROM coin_cache WHERE endpoint = ?', 
+                (cache_key,)
+            )
+            cache_data = cursor.fetchone()
+            if cache_data:
+                logger.info("Returning expired cached data due to API error")
+                return json.loads(cache_data['data'])
+        
         return []
 
 def search_coins(query, limit=10):
@@ -279,9 +349,7 @@ def get_watchlist():
     """Get user's watchlist with current prices"""
     try:
         with get_db_connection() as conn:
-            cursor = conn.execute('''
-                SELECT * FROM watchlist ORDER BY added_at DESC
-            ''')
+            cursor = conn.execute('SELECT * FROM watchlist ORDER BY added_at DESC')
             watchlist_items = [dict(row) for row in cursor.fetchall()]
         
         if not watchlist_items:
@@ -289,28 +357,57 @@ def get_watchlist():
         
         # Get current prices for all coins in watchlist
         coin_ids = [item['coin_id'] for item in watchlist_items]
-        price_data = fetch_coin_data(coin_ids)
         
-        # Enrich watchlist items with current market data
-        enriched_watchlist = []
-        for item in watchlist_items:
-            coin_id = item['coin_id']
-            market_data = price_data.get(coin_id, {})
-            
-            enriched_item = {
-                **item,
-                'current_price': market_data.get('usd', 0),
-                'change_24h': market_data.get('usd_24h_change', 0),
-                'market_cap': market_data.get('usd_market_cap', 0)
+        try:
+            # Use simple/price endpoint instead of markets for better reliability
+            url = f"{COINGECKO_API_BASE}/simple/price"
+            params = {
+                'ids': ','.join(coin_ids),
+                'vs_currencies': 'usd',
+                'include_24h_vol': 'true',
+                'include_24h_change': 'true',
+                'include_market_cap': 'true'
             }
-            enriched_watchlist.append(enriched_item)
-        
-        return jsonify({'watchlist': enriched_watchlist})
+            
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            market_data = response.json()
+            
+            # Enrich watchlist items with current market data
+            enriched_watchlist = []
+            for item in watchlist_items:
+                coin_id = item['coin_id']
+                coin_market_data = market_data.get(coin_id, {})
+                
+                enriched_item = {
+                    **item,
+                    'current_price': coin_market_data.get('usd', 0),
+                    'price_change_24h': coin_market_data.get('usd_24h_change', 0),
+                    'market_cap': coin_market_data.get('usd_market_cap', 0)
+                }
+                enriched_watchlist.append(enriched_item)
+            
+            return jsonify({
+                'success': True,
+                'watchlist': enriched_watchlist
+            })
+            
+        except requests.RequestException as e:
+            # If API fails, return watchlist without market data
+            logger.error(f"Error fetching market data: {e}")
+            return jsonify({
+                'success': True,
+                'watchlist': watchlist_items,
+                'warning': 'Market data temporarily unavailable'
+            })
         
     except Exception as e:
         logger.error(f"Error getting watchlist: {e}")
-        return jsonify({'error': str(e)}), 500
-
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+    
 @app.route('/api/watchlist', methods=['POST'])
 def add_to_watchlist():
     """Add a coin to the watchlist"""
@@ -325,7 +422,7 @@ def add_to_watchlist():
         
         with get_db_connection() as conn:
             try:
-                conn.execute('''
+                cursor = conn.execute('''
                     INSERT INTO watchlist (coin_id, coin_name, symbol)
                     VALUES (?, ?, ?)
                 ''', (
@@ -334,14 +431,30 @@ def add_to_watchlist():
                     data['symbol'].upper()
                 ))
                 conn.commit()
+                
+                # Get the inserted item
+                new_id = cursor.lastrowid
+                cursor = conn.execute('SELECT * FROM watchlist WHERE id = ?', (new_id,))
+                new_item = dict(cursor.fetchone())
+                
+                return jsonify({
+                    'success': True,
+                    'data': new_item,
+                    'message': 'Added to watchlist successfully'
+                }), 201
+                
             except sqlite3.IntegrityError:
-                return jsonify({'error': 'Coin already in watchlist'}), 409
-        
-        return jsonify({'message': 'Added to watchlist successfully'}), 201
+                return jsonify({
+                    'success': False,
+                    'error': 'Coin already in watchlist'
+                }), 409
         
     except Exception as e:
         logger.error(f"Error adding to watchlist: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/api/watchlist/<int:watchlist_id>', methods=['DELETE'])
 def remove_from_watchlist(watchlist_id):
@@ -350,14 +463,24 @@ def remove_from_watchlist(watchlist_id):
         with get_db_connection() as conn:
             cursor = conn.execute('DELETE FROM watchlist WHERE id = ?', (watchlist_id,))
             if cursor.rowcount == 0:
-                return jsonify({'error': 'Watchlist item not found'}), 404
+                return jsonify({
+                    'success': False,
+                    'error': 'Watchlist item not found'
+                }), 404
             conn.commit()
         
-        return jsonify({'message': 'Removed from watchlist successfully'})
+        return jsonify({
+            'success': True,
+            'message': 'Removed from watchlist successfully'
+        })
         
     except Exception as e:
         logger.error(f"Error removing from watchlist: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+    
 
 # Market data endpoints
 @app.route('/api/coins/all', methods=['GET'])
@@ -373,11 +496,13 @@ def get_all_coins():
         total_coins = 500
         
         if not coins_data:
+            logger.warning("No coin data available")
             return jsonify({
                 'coins': [],
-                'total': total_coins,
+                'total': 500,
                 'page': page,
-                'per_page': per_page
+                'per_page': per_page,
+                'error': 'Data temporarily unavailable'
             })
         
         formatted_coins = []
@@ -404,14 +529,14 @@ def get_all_coins():
         })
         
     except Exception as e:
-        print(f"Error in get_all_coins: {str(e)}")
+        logger.error(f"Error in get_all_coins: {str(e)}")
         return jsonify({
             'coins': [],
             'total': 500,
-            'page': 1,
-            'per_page': 50,
-            'error': str(e)
-        })
+            'page': page,
+            'per_page': per_page,
+            'error': 'Service temporarily unavailable'
+        }), 503
     
     
 # --- Add this new endpoint below ---
@@ -585,6 +710,7 @@ def export_portfolio():
     except Exception as e:
         logger.error(f"Error exporting portfolio: {e}")
         return jsonify({'error': str(e)}), 500
+
 
 # Error handlers
 @app.errorhandler(404)
