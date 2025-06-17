@@ -2,42 +2,135 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <!-- Updated favicon to use crypto green icon -->
+    <link rel="icon" href="%PUBLIC_URL%/crypto-green-bitcoin.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
+    <!-- Updated theme color to match crypto green -->
+    <meta name="theme-color" content="#00ff88" />
     <meta
       name="description"
-      content="Web site created using create-react-app"
+      content="Professional crypto tracker with real-time prices and portfolio management"
     />
-    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-    <!--
-      manifest.json provides metadata used when your web app is installed on a
-      user's mobile device or desktop. See https://developers.google.com/web/fundamentals/web-app-manifest/
-    -->
+    <!-- Updated apple touch icon -->
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/crypto-icon-192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    <!--
-      Notice the use of %PUBLIC_URL% in the tags above.
-      It will be replaced with the URL of the `public` folder during the build.
-      Only files inside the `public` folder can be referenced from the HTML.
-
-      Unlike "/favicon.ico" or "favicon.ico", "%PUBLIC_URL%/favicon.ico" will
-      work correctly both with client-side routing and a non-root public URL.
-      Learn how to configure a non-root public URL by running `npm run build`.
-    -->
-    <title>React App</title>
+    
+    <!-- Preload the crypto icon for better performance -->
+    <link rel="preload" href="%PUBLIC_URL%/crypto-green-bitcoin.svg" as="image" type="image/svg+xml" />
+    
+    <!-- Add some crypto-themed styling -->
+    <style>
+      body {
+        background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+        color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+          'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+          sans-serif;
+      }
+      
+      /* Loading screen with crypto theme */
+      .crypto-loading {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      }
+      
+      .crypto-logo {
+        width: 80px;
+        height: 80px;
+        margin-bottom: 20px;
+        animation: pulse 2s infinite;
+      }
+      
+      .loading-text {
+        color: #00ff88;
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 10px;
+      }
+      
+      .loading-subtext {
+        color: #888;
+        font-size: 14px;
+      }
+      
+      @keyframes pulse {
+        0% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.05); opacity: 0.8; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+      
+      /* Hide loading screen when React loads */
+      .react-loaded .crypto-loading {
+        display: none;
+      }
+    </style>
+    
+    <title>Crypto Tracker - Real-time Cryptocurrency Prices</title>
   </head>
   <body>
-    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <noscript>
+      <div style="text-align: center; padding: 50px; background: #1a1a2e; color: white;">
+        <h2>⚠️ JavaScript Required</h2>
+        <p>You need to enable JavaScript to run this crypto tracker app.</p>
+        <p>Please enable JavaScript in your browser settings and refresh the page.</p>
+      </div>
+    </noscript>
+    
+    <!-- Loading screen with crypto branding -->
+    <div class="crypto-loading" id="cryptoLoading">
+      <!-- Inline SVG for instant loading -->
+      <svg class="crypto-logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+        <defs>
+          <radialGradient id="greenGradient" cx="50%" cy="30%" r="70%">
+            <stop offset="0%" style="stop-color:#00ff88;stop-opacity:1" />
+            <stop offset="100%" style="stop-color:#00cc6a;stop-opacity:1" />
+          </radialGradient>
+          <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+            <feMerge> 
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        <circle cx="100" cy="100" r="85" fill="url(#greenGradient)" stroke="#00ff88" stroke-width="3"/>
+        <circle cx="100" cy="100" r="75" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+        <g transform="translate(100,100)" fill="white" filter="url(#glow)">
+          <rect x="-25" y="-45" width="6" height="90" rx="3"/>
+          <rect x="-15" y="-55" width="4" height="15" rx="2"/>
+          <rect x="-5" y="-55" width="4" height="15" rx="2"/>
+          <rect x="-15" y="40" width="4" height="15" rx="2"/>
+          <rect x="-5" y="40" width="4" height="15" rx="2"/>
+          <path d="M -19 -35 Q 15 -35 15 -15 Q 15 5 -19 0 Z" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+          <path d="M -19 0 Q 20 0 20 20 Q 20 35 -19 35 Z" stroke="white" stroke-width="2" stroke-linejoin="round"/>
+          <rect x="-19" y="-2" width="35" height="4" rx="2"/>
+        </g>
+        <ellipse cx="75" cy="65" rx="15" ry="8" fill="rgba(255,255,255,0.3)" opacity="0.6"/>
+      </svg>
+      
+      <div class="loading-text">Loading Crypto Tracker</div>
+      <div class="loading-subtext">Fetching real-time prices...</div>
+    </div>
+    
     <div id="root"></div>
-    <!--
-      This HTML file is a template.
-      If you open it directly in the browser, you will see an empty page.
-
-      You can add webfonts, meta tags, or analytics to this file.
-      The build step will place the bundled scripts into the <body> tag.
-
-      To begin the development, run `npm start` or `yarn start`.
-      To create a production bundle, use `npm run build` or `yarn build`.
-    -->
+    
+    <!-- Script to hide loading screen when React loads -->
+    <script>
+      // Hide loading screen when React app loads
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          document.body.classList.add('react-loaded');
+        }, 500);
+      });
+    </script>
   </body>
 </html>
